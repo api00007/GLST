@@ -31,6 +31,28 @@ SPORT_DISPLAY_MAP = {
     "motorsport": "Racing"
 }
 
+SOFASCORE_LEAGUE_LOGOS = {
+    "NFL": "https://api.sofascore.app/api/v1/unique-tournament/9464/image",
+    "NCAA Football": "https://api.sofascore.app/api/v1/unique-tournament/11200/image",
+    "NBA": "https://api.sofascore.app/api/v1/unique-tournament/132/image",
+    "WNBA": "https://api.sofascore.app/api/v1/unique-tournament/11186/image",
+    "EuroLeague": "https://api.sofascore.app/api/v1/unique-tournament/138/image",
+    "MLB": "https://api.sofascore.app/api/v1/unique-tournament/11205/image",
+    "NHL": "https://api.sofascore.app/api/v1/unique-tournament/234/image",
+    "Premier League": "https://api.sofascore.app/api/v1/unique-tournament/17/image",
+    "LaLiga": "https://api.sofascore.app/api/v1/unique-tournament/8/image",
+    "Serie A": "https://api.sofascore.app/api/v1/unique-tournament/23/image",
+    "Bundesliga": "https://api.sofascore.app/api/v1/unique-tournament/35/image",
+    "Ligue 1": "https://api.sofascore.app/api/v1/unique-tournament/34/image",
+    "Champions League": "https://api.sofascore.app/api/v1/unique-tournament/7/image",
+    "Europa League": "https://api.sofascore.app/api/v1/unique-tournament/679/image",
+    "MLS": "https://api.sofascore.app/api/v1/unique-tournament/242/image",
+    "Saudi Pro League": "https://api.sofascore.app/api/v1/unique-tournament/955/image",
+    "Formula 1": "https://api.sofascore.app/api/v1/unique-tournament/10839/image",
+    "UFC": "https://api.sofascore.app/api/v1/unique-tournament/11187/image",
+    "Boxing": "https://api.sofascore.app/api/v1/unique-tournament/11235/image"
+}
+
 def get_ist_time():
     ist_offset = timezone(timedelta(hours=5, minutes=30))
     return datetime.now(ist_offset).strftime('%d/%m/%y %H:%M:%S IST')
@@ -64,27 +86,50 @@ def safe_json_parse(text):
 
 def detect_league(mid, raw_league, sport_name):
     mid_lower = mid.lower()
-    if "nfl" in mid_lower:
+    raw_lower = raw_league.lower() if raw_league else ""
+    
+    if "nfl" in mid_lower or "nfl" in raw_lower:
         return "NFL"
-    elif "college-football" in mid_lower or "ncaa" in mid_lower:
+    elif "college-football" in mid_lower or "ncaa" in mid_lower or "cfb" in mid_lower:
         return "NCAA Football"
-    elif "wnba" in mid_lower:
+    elif "wnba" in mid_lower or "wnba" in raw_lower:
         return "WNBA"
-    elif "nba" in mid_lower:
+    elif "nba" in mid_lower or "nba" in raw_lower:
         return "NBA"
-    elif "mlb" in mid_lower:
+    elif "mlb" in mid_lower or "mlb" in raw_lower:
         return "MLB"
-    elif "nhl" in mid_lower:
+    elif "nhl" in mid_lower or "nhl" in raw_lower:
         return "NHL"
-    elif "f1" in mid_lower or "formula" in mid_lower:
+    elif "premier-league" in mid_lower or "epl" in raw_lower:
+        return "Premier League"
+    elif "la-liga" in mid_lower or "laliga" in raw_lower:
+        return "LaLiga"
+    elif "serie-a" in mid_lower or "serie a" in raw_lower:
+        return "Serie A"
+    elif "bundesliga" in mid_lower or "bundesliga" in raw_lower:
+        return "Bundesliga"
+    elif "ligue-1" in mid_lower or "ligue 1" in raw_lower:
+        return "Ligue 1"
+    elif "champions-league" in mid_lower or "ucl" in raw_lower:
+        return "Champions League"
+    elif "europa-league" in mid_lower or "uel" in raw_lower:
+        return "Europa League"
+    elif "mls" in mid_lower or "mls" in raw_lower:
+        return "MLS"
+    elif "f1" in mid_lower or "formula" in mid_lower or "formula 1" in raw_lower:
         return "Formula 1"
-    elif "nascar" in mid_lower:
-        return "NASCAR"
-    elif "ufc" in mid_lower:
+    elif "ufc" in mid_lower or "ufc" in raw_lower:
         return "UFC"
     elif raw_league and len(raw_league.strip()) > 1:
         return raw_league.strip().upper()
+        
     return SPORT_DISPLAY_MAP.get(sport_name, sport_name.title())
+
+def get_league_logo(league_name, fallback_badge):
+    for key, logo_url in SOFASCORE_LEAGUE_LOGOS.items():
+        if key.lower() in league_name.lower():
+            return logo_url
+    return fallback_badge
 
 def push_to_github():
     GITHUB_TOKEN = os.getenv("GH_TOKEN")
@@ -244,7 +289,9 @@ def run_scraper():
 
                 team_a_badge = f"{API_ORIGIN}/api/images/badge/{t_away.get('badge')}.webp" if t_away.get("badge") else ""
                 team_b_badge = f"{API_ORIGIN}/api/images/badge/{t_home.get('badge')}.webp" if t_home.get("badge") else ""
-                league_logo = team_a_badge if team_a_badge else team_b_badge
+
+                fallback_badge = team_a_badge if team_a_badge else team_b_badge
+                league_logo = get_league_logo(league_name, fallback_badge)
 
                 sources = match.get("sources", [])
                 if not sources:
