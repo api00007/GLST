@@ -12,6 +12,7 @@ import cloudscraper
 
 API_ORIGIN = "https://streamcenter.st"
 OUTPUT_FILE = "glst.json"
+BACKUP_LOGO = "https://i.ibb.co/1Yh8PdLH/1000459066.jpg"
 
 DEFAULT_SPORTS = [
     "football", "soccer", "basketball", 
@@ -129,7 +130,7 @@ def get_league_logo(league_name, fallback_badge):
     for key, logo_url in SOFASCORE_LEAGUE_LOGOS.items():
         if key.lower() in league_name.lower():
             return logo_url
-    return fallback_badge
+    return fallback_badge if fallback_badge else BACKUP_LOGO
 
 def push_to_github():
     GITHUB_TOKEN = os.getenv("GH_TOKEN")
@@ -275,22 +276,27 @@ def run_scraper():
                 league_name = detect_league(match_id, raw_league, sport)
 
                 ts = match.get("date", int(time.time() * 1000))
+                
+                dt_utc = datetime.fromtimestamp(ts / 1000, timezone.utc)
+                end_utc = dt_utc + timedelta(hours=3)
+                utc_start_str = dt_utc.strftime("%Y/%m/%d %H:%M:%S +0000")
+                utc_end_str = end_utc.strftime("%Y/%m/%d %H:%M:%S +0000")
+
                 start_dt = datetime.fromtimestamp(ts / 1000, ist)
                 end_dt = start_dt + timedelta(hours=3)
-
                 start_time_str = start_dt.strftime("%d/%m/%Y; %H:%M:%S IST")
                 end_time_str = end_dt.strftime("%d/%m/%Y; %H:%M:%S IST")
 
                 t_home = match.get("teams", {}).get("home", {})
                 t_away = match.get("teams", {}).get("away", {})
 
-                team_a_name = t_away.get("name") or "Team A"
-                team_b_name = t_home.get("name") or "Team B"
+                team_a_name = t_away.get("name") or league_name
+                team_b_name = t_home.get("name") or league_name
 
-                team_a_badge = f"{API_ORIGIN}/api/images/badge/{t_away.get('badge')}.webp" if t_away.get("badge") else ""
-                team_b_badge = f"{API_ORIGIN}/api/images/badge/{t_home.get('badge')}.webp" if t_home.get("badge") else ""
+                team_a_badge = f"{API_ORIGIN}/api/images/badge/{t_away.get('badge')}.webp" if t_away.get("badge") else BACKUP_LOGO
+                team_b_badge = f"{API_ORIGIN}/api/images/badge/{t_home.get('badge')}.webp" if t_home.get("badge") else BACKUP_LOGO
 
-                fallback_badge = team_a_badge if team_a_badge else team_b_badge
+                fallback_badge = team_a_badge if team_a_badge != BACKUP_LOGO else team_b_badge
                 league_logo = get_league_logo(league_name, fallback_badge)
 
                 sources = match.get("sources", [])
@@ -324,13 +330,11 @@ def run_scraper():
 
                             final_m3u8 = extract_stream_from_embed(scraper, embed_url)
                             if final_m3u8:
-                                # Stream Name logic: 1st stream is {LEAGUE} SERVER, 2nd is HD SERVER
                                 if stream_num == 1:
                                     server_name = f"{league_name.upper()} SERVER"
                                 else:
                                     server_name = "HD SERVER" if stream_num == 2 else f"HD SERVER {stream_num - 1}"
 
-                                # Exact Iframe Format requested
                                 iframe_link = f'<iframe src="https://ivan-player.vercel.app/?play=https://stream-proxy.goalzen.site/proxy/php?url={final_m3u8}" style="width: 100%; aspect-ratio: 16/9; border: none;" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>'
 
                                 log_to_console(f"    [+] Link Created: {clean_rivals} ({server_name})")
@@ -347,6 +351,8 @@ def run_scraper():
                                     ("Team_B_Logo", team_b_badge),
                                     ("Start_Time", start_time_str),
                                     ("End_Time", end_time_str),
+                                    ("UTC_Start", utc_start_str),
+                                    ("UTC_End", utc_end_str),
                                     ("Link", iframe_link)
                                 ]))
                     except Exception:
