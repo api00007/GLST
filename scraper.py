@@ -148,7 +148,7 @@ def push_to_github():
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
             
-        clone_status = os.system(f"git clone {remote_url} {temp_dir}")
+        clone_status = os.system(f"git clone --depth 1 {remote_url} {temp_dir}")
         if clone_status != 0:
             raise Exception("Git clone failed. Please check repository permissions or token.")
         
@@ -160,7 +160,7 @@ def push_to_github():
         os.system(f'git config user.email "{GITHUB_EMAIL if GITHUB_EMAIL else "action@github.com"}"')
         os.system(f'git config user.name "{GITHUB_USER}"')
         os.system(f"git add {OUTPUT_FILE}")
-        os.system(f'git commit -m "Auto Update: {get_ist_time()}" || echo "No changes"')
+        os.system(f'git commit -m "Auto Update: {get_ist_time()}" --allow-empty')
         push_status = os.system("git push origin main")
         
         os.chdir(current_dir)
@@ -324,20 +324,30 @@ def run_scraper():
 
                             final_m3u8 = extract_stream_from_embed(scraper, embed_url)
                             if final_m3u8:
-                                log_to_console(f"    [+] Link Created: {clean_rivals} (S-{stream_num})")
+                                # Stream Name logic: 1st stream is {LEAGUE} SERVER, 2nd is HD SERVER
+                                if stream_num == 1:
+                                    server_name = f"{league_name.upper()} SERVER"
+                                else:
+                                    server_name = "HD SERVER" if stream_num == 2 else f"HD SERVER {stream_num - 1}"
+
+                                # Exact Iframe Format requested
+                                iframe_link = f'<iframe src="https://ivan-player.vercel.app/?play=https://stream-proxy.goalzen.site/proxy/php?url={final_m3u8}" style="width: 100%; aspect-ratio: 16/9; border: none;" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>'
+
+                                log_to_console(f"    [+] Link Created: {clean_rivals} ({server_name})")
                                 all_live_matches.append(OrderedDict([
                                     ("Id", str(len(all_live_matches) + 1)),
                                     ("Category", cat_name),
                                     ("Event_Name", clean_rivals),
-                                    ("League_Name", f"{league_name} (S-{stream_num})"),
+                                    ("League_Name", league_name),
                                     ("League_Logo", league_logo),
+                                    ("Stream_Name", server_name),
                                     ("Team_A", team_a_name),
                                     ("Team_A_Logo", team_a_badge),
                                     ("Team_B", team_b_name),
                                     ("Team_B_Logo", team_b_badge),
                                     ("Start_Time", start_time_str),
                                     ("End_Time", end_time_str),
-                                    ("Link", final_m3u8)
+                                    ("Link", iframe_link)
                                 ]))
                     except Exception:
                         continue
