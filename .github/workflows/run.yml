@@ -2,9 +2,10 @@ name: GLST Auto Scraper
 
 on:
   schedule:
-    # প্রতি ২০ মিনিট পর পর স্বয়ংক্রিয়ভাবে চলবে
     - cron: '*/20 * * * *'
-  workflow_dispatch: # ম্যানুয়ালি রান করার অপশন
+  workflow_dispatch:
+  repository_dispatch:
+    types: [trigger-scraper]
 
 jobs:
   scrape:
