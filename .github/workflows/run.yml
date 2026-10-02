@@ -1,0 +1,33 @@
+name: GLST Auto Scraper
+
+on:
+  schedule:
+    # প্রতি ২০ মিনিট পর পর স্বয়ংক্রিয়ভাবে চলবে
+    - cron: '*/20 * * * *'
+  workflow_dispatch: # ম্যানুয়ালি রান করার অপশন
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Scraper
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          TGITHUB_USER: ${{ secrets.TGITHUB_USER }}
+          TGITHUB_REPO: ${{ secrets.TGITHUB_REPO }}
+          TGITHUB_EMAIL: ${{ secrets.TGITHUB_EMAIL }}
+        run: |
+          python scraper.py
