@@ -176,10 +176,18 @@ def push_to_github():
         log_to_console(f"[ERROR] Push failed: {e}")
 
 def scan_m3u8_from_html(html_text):
-    tokens = re.findall(r'(?:stream=|hls\.php\?stream=)([a-zA-Z0-9_.-]+)', html_text)
-    for token in tokens:
-        return f"https://edgestream2.pro/hls/{token}.m3u8|Referer=https://streame.center"
-        
+    if not html_text:
+        return None
+
+    # Universal token scanner (matches hls.php?stream=XYZ or stream=XYZ)
+    token_matches = re.findall(r'(?:[?&]stream=|hls\.php\?stream=)([a-zA-Z0-9_.-]+)', html_text)
+    if token_matches:
+        return f"https://edgestream2.pro/hls/{token_matches[0]}.m3u8|Referer=https://streame.center"
+
+    fallback_tokens = re.findall(r'stream=([a-zA-Z0-9_.-]+)', html_text)
+    if fallback_tokens:
+        return f"https://edgestream2.pro/hls/{fallback_tokens[0]}.m3u8|Referer=https://streame.center"
+
     direct_m3u8 = re.findall(r'(https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*)', html_text)
     for link in direct_m3u8:
         clean_link = link.replace('\\/', '/').strip('"\';')
@@ -187,39 +195,49 @@ def scan_m3u8_from_html(html_text):
         
     return None
 
+def fetch_with_retry(scraper, url, headers=None, retries=2, timeout=10):
+    for attempt in range(retries + 1):
+        try:
+            res = scraper.get(url, headers=headers, timeout=timeout)
+            if res.status_code == 200 and res.text:
+                return res
+            elif res.status_code in [429, 502, 503]:
+                time.sleep(1.0 + attempt * 1.0)
+        except Exception:
+            time.sleep(0.8)
+    return None
+
 def extract_stream_from_embed(scraper, embed_url):
-    try:
-        headers = {
-            'Referer': f"{API_ORIGIN}/",
-            'Origin': API_ORIGIN
-        }
-        res = scraper.get(embed_url, headers=headers, timeout=12)
-        res.encoding = 'utf-8'
-        html = res.text
-        
-        link = scan_m3u8_from_html(html)
-        if link:
-            return link
+    headers = {
+        'Referer': f"{API_ORIGIN}/",
+        'Origin': API_ORIGIN
+    }
+    res = fetch_with_retry(scraper, embed_url, headers=headers, retries=2, timeout=10)
+    if not res:
+        return embed_url
 
-        iframes = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.I)
-        for ifr in iframes:
-            if ifr.startswith('//'):
-                ifr_url = 'https:' + ifr
-            elif not ifr.startswith('http'):
-                ifr_url = urljoin(embed_url, ifr)
-            else:
-                ifr_url = ifr
+    html = res.text
+    link = scan_m3u8_from_html(html)
+    if link:
+        return link
 
-            time.sleep(random.uniform(0.3, 0.5))
-            ifr_res = scraper.get(ifr_url, headers={'Referer': embed_url}, timeout=10)
-            ifr_res.encoding = 'utf-8'
+    # Scan inner iframes if needed
+    iframes = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.I)
+    for ifr in iframes:
+        if ifr.startswith('//'):
+            ifr_url = 'https:' + ifr
+        elif not ifr.startswith('http'):
+            ifr_url = urljoin(embed_url, ifr)
+        else:
+            ifr_url = ifr
+
+        ifr_res = fetch_with_retry(scraper, ifr_url, headers={'Referer': embed_url}, retries=1, timeout=8)
+        if ifr_res:
             ifr_link = scan_m3u8_from_html(ifr_res.text)
             if ifr_link:
                 return ifr_link
-    except Exception as e:
-        log_to_console(f"    [!] Error loading embed {embed_url}: {e}")
-        
-    return None
+
+    return embed_url
 
 def run_scraper():
     scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'android', 'desktop': False})
@@ -228,8 +246,8 @@ def run_scraper():
     sports_slugs = []
 
     try:
-        sports_res = scraper.get(f"{API_ORIGIN}/api/sports", timeout=12)
-        if sports_res.status_code == 200:
+        sports_res = fetch_with_retry(scraper, f"{API_ORIGIN}/api/sports", timeout=10)
+        if sports_res:
             parsed = safe_json_parse(sports_res.text)
             if isinstance(parsed, list):
                 for item in parsed:
@@ -254,9 +272,9 @@ def run_scraper():
     for sport in sports_slugs:
         log_to_console(f"[*] Scanning matches for sport: {sport}")
         try:
-            time.sleep(random.uniform(0.4, 0.7))
-            matches_res = scraper.get(f"{API_ORIGIN}/api/matches/{sport}", timeout=12)
-            if matches_res.status_code != 200:
+            time.sleep(random.uniform(0.3, 0.6))
+            matches_res = fetch_with_retry(scraper, f"{API_ORIGIN}/api/matches/{sport}", timeout=10)
+            if not matches_res:
                 continue
 
             matches_data = safe_json_parse(matches_res.text)
@@ -277,11 +295,13 @@ def run_scraper():
 
                 ts = match.get("date", int(time.time() * 1000))
                 
+                # Precise UTC Times for database & app
                 dt_utc = datetime.fromtimestamp(ts / 1000, timezone.utc)
                 end_utc = dt_utc + timedelta(hours=3)
                 utc_start_str = dt_utc.strftime("%Y/%m/%d %H:%M:%S +0000")
                 utc_end_str = end_utc.strftime("%Y/%m/%d %H:%M:%S +0000")
 
+                # Precise IST Times for display
                 start_dt = datetime.fromtimestamp(ts / 1000, ist)
                 end_dt = start_dt + timedelta(hours=3)
                 start_time_str = start_dt.strftime("%d/%m/%Y; %H:%M:%S IST")
@@ -300,7 +320,30 @@ def run_scraper():
                 league_logo = get_league_logo(league_name, fallback_badge)
 
                 sources = match.get("sources", [])
+                
+                # Zero-Drop Guarantee: if sources are not ready, don't drop the match
                 if not sources:
+                    fallback_stream = f"{API_ORIGIN}/watch/{match_id}"
+                    iframe_link = f'<iframe src="https://ivan-player.vercel.app/?play=https://stream-proxy.goalzen.site/proxy/php?url={fallback_stream}" style="width: 100%; aspect-ratio: 16/9; border: none;" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>'
+                    server_name = f"{league_name.upper()} SERVER"
+                    
+                    all_live_matches.append(OrderedDict([
+                        ("Id", str(len(all_live_matches) + 1)),
+                        ("Category", cat_name),
+                        ("Event_Name", clean_rivals),
+                        ("League_Name", league_name),
+                        ("League_Logo", league_logo),
+                        ("Stream_Name", server_name),
+                        ("Team_A", team_a_name),
+                        ("Team_A_Logo", team_a_badge),
+                        ("Team_B", team_b_name),
+                        ("Team_B_Logo", team_b_badge),
+                        ("Start_Time", start_time_str),
+                        ("End_Time", end_time_str),
+                        ("UTC_Start", utc_start_str),
+                        ("UTC_End", utc_end_str),
+                        ("Link", iframe_link)
+                    ]))
                     continue
 
                 for s_idx, src in enumerate(sources, 1):
@@ -309,55 +352,51 @@ def run_scraper():
                     if not src_id:
                         continue
 
-                    time.sleep(random.uniform(0.3, 0.6))
+                    time.sleep(random.uniform(0.2, 0.4))
                     stream_api = f"{API_ORIGIN}/api/stream/{src_type}/{src_id}"
                     
-                    try:
-                        stream_res = scraper.get(stream_api, timeout=10)
-                        if stream_res.status_code != 200:
-                            continue
+                    streams_info = []
+                    stream_res = fetch_with_retry(scraper, stream_api, timeout=8)
+                    if stream_res:
+                        streams_info = safe_json_parse(stream_res.text) or []
 
-                        streams_info = safe_json_parse(stream_res.text)
-                        if not isinstance(streams_info, list) or not streams_info:
-                            continue
+                    if not streams_info:
+                        # Fallback if API hasn't populated stream details yet
+                        streams_info = [{"embedUrl": f"{API_ORIGIN}/watch/{match_id}", "streamNo": s_idx}]
 
-                        for stream_entry in streams_info:
-                            embed_url = stream_entry.get("embedUrl")
-                            stream_num = stream_entry.get("streamNo", s_idx)
-                            
-                            if not embed_url:
-                                continue
+                    for stream_entry in streams_info:
+                        embed_url = stream_entry.get("embedUrl") or f"{API_ORIGIN}/watch/{match_id}"
+                        stream_num = stream_entry.get("streamNo", s_idx)
 
-                            final_m3u8 = extract_stream_from_embed(scraper, embed_url)
-                            if final_m3u8:
-                                if stream_num == 1:
-                                    server_name = f"{league_name.upper()} SERVER"
-                                else:
-                                    server_name = "HD SERVER" if stream_num == 2 else f"HD SERVER {stream_num - 1}"
+                        final_m3u8 = extract_stream_from_embed(scraper, embed_url)
 
-                                iframe_link = f'<iframe src="https://ivan-player.vercel.app/?play=https://stream-proxy.goalzen.site/proxy/php?url={final_m3u8}" style="width: 100%; aspect-ratio: 16/9; border: none;" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>'
+                        if stream_num == 1:
+                            server_name = f"{league_name.upper()} SERVER"
+                        else:
+                            server_name = "HD SERVER" if stream_num == 2 else f"HD SERVER {stream_num - 1}"
 
-                                log_to_console(f"    [+] Link Created: {clean_rivals} ({server_name})")
-                                all_live_matches.append(OrderedDict([
-                                    ("Id", str(len(all_live_matches) + 1)),
-                                    ("Category", cat_name),
-                                    ("Event_Name", clean_rivals),
-                                    ("League_Name", league_name),
-                                    ("League_Logo", league_logo),
-                                    ("Stream_Name", server_name),
-                                    ("Team_A", team_a_name),
-                                    ("Team_A_Logo", team_a_badge),
-                                    ("Team_B", team_b_name),
-                                    ("Team_B_Logo", team_b_badge),
-                                    ("Start_Time", start_time_str),
-                                    ("End_Time", end_time_str),
-                                    ("UTC_Start", utc_start_str),
-                                    ("UTC_End", utc_end_str),
-                                    ("Link", iframe_link)
-                                ]))
-                    except Exception:
-                        continue
-        except Exception:
+                        iframe_link = f'<iframe src="https://ivan-player.vercel.app/?play=https://stream-proxy.goalzen.site/proxy/php?url={final_m3u8}" style="width: 100%; aspect-ratio: 16/9; border: none;" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>'
+
+                        log_to_console(f"    [+] Link Created: {clean_rivals} ({server_name})")
+                        all_live_matches.append(OrderedDict([
+                            ("Id", str(len(all_live_matches) + 1)),
+                            ("Category", cat_name),
+                            ("Event_Name", clean_rivals),
+                            ("League_Name", league_name),
+                            ("League_Logo", league_logo),
+                            ("Stream_Name", server_name),
+                            ("Team_A", team_a_name),
+                            ("Team_A_Logo", team_a_badge),
+                            ("Team_B", team_b_name),
+                            ("Team_B_Logo", team_b_badge),
+                            ("Start_Time", start_time_str),
+                            ("End_Time", end_time_str),
+                            ("UTC_Start", utc_start_str),
+                            ("UTC_End", utc_end_str),
+                            ("Link", iframe_link)
+                        ]))
+        except Exception as e:
+            log_to_console(f"[ERROR] Category {sport} error: {e}")
             continue
 
     log_to_console(f"\n[+] Total Live Streams Collected: {len(all_live_matches)}")
