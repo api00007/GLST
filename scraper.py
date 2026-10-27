@@ -179,19 +179,19 @@ def scan_m3u8_from_html(html_text):
     if not html_text:
         return None
 
-    # Universal token scanner (matches hls.php?stream=XYZ or stream=XYZ)
+    # Updated with new Referer: https://embedcenter.st
     token_matches = re.findall(r'(?:[?&]stream=|hls\.php\?stream=)([a-zA-Z0-9_.-]+)', html_text)
     if token_matches:
-        return f"https://edgestream2.pro/hls/{token_matches[0]}.m3u8|Referer=https://streame.center"
+        return f"https://edgestream2.pro/hls/{token_matches[0]}.m3u8|Referer=https://embedcenter.st"
 
     fallback_tokens = re.findall(r'stream=([a-zA-Z0-9_.-]+)', html_text)
     if fallback_tokens:
-        return f"https://edgestream2.pro/hls/{fallback_tokens[0]}.m3u8|Referer=https://streame.center"
+        return f"https://edgestream2.pro/hls/{fallback_tokens[0]}.m3u8|Referer=https://embedcenter.st"
 
     direct_m3u8 = re.findall(r'(https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*)', html_text)
     for link in direct_m3u8:
         clean_link = link.replace('\\/', '/').strip('"\';')
-        return f"{clean_link}|Referer=https://streame.center"
+        return f"{clean_link}|Referer=https://embedcenter.st"
         
     return None
 
@@ -221,7 +221,6 @@ def extract_stream_from_embed(scraper, embed_url):
     if link:
         return link
 
-    # Scan inner iframes if needed
     iframes = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.I)
     for ifr in iframes:
         if ifr.startswith('//'):
@@ -321,7 +320,6 @@ def run_scraper():
 
                 sources = match.get("sources", [])
                 
-                # Zero-Drop Guarantee: if sources are not ready, don't drop the match
                 if not sources:
                     fallback_stream = f"{API_ORIGIN}/watch/{match_id}"
                     iframe_link = f'<iframe src="https://ivan-player.vercel.app/?play=https://stream-proxy.goalzen.site/proxy/php?url={fallback_stream}" style="width: 100%; aspect-ratio: 16/9; border: none;" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>'
@@ -361,7 +359,6 @@ def run_scraper():
                         streams_info = safe_json_parse(stream_res.text) or []
 
                     if not streams_info:
-                        # Fallback if API hasn't populated stream details yet
                         streams_info = [{"embedUrl": f"{API_ORIGIN}/watch/{match_id}", "streamNo": s_idx}]
 
                     for stream_entry in streams_info:
